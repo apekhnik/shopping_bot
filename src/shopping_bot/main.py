@@ -15,8 +15,9 @@ async def run() -> None:
     #   - build enabled sources
     #   - start APScheduler with periodic scan job
     #   - start aiogram Dispatcher (long-polling)
-    # For now this is just a boot smoke-test.
-    await asyncio.sleep(0)
+    # Until then keep the process alive so the platform doesn't loop-restart us.
+    while True:
+        await asyncio.sleep(3600)
 
 
 def main() -> None:
