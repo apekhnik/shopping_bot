@@ -5,12 +5,13 @@ import asyncio
 import structlog
 from sqlalchemy import text
 
+from shopping_bot.config import settings
 from shopping_bot.db.session import engine
 from shopping_bot.logging_setup import configure_logging
+from shopping_bot.sources import SourceUnavailable, VarusSource
 
 
 def _mask_db_url(url: str) -> str:
-    # Strip credentials from a SQLAlchemy URL for logging.
     if "@" not in url:
         return url
     scheme_and_creds, host_part = url.rsplit("@", 1)
@@ -27,6 +28,24 @@ async def _ping_db(log: structlog.stdlib.BoundLogger) -> None:
         log.error("shopping_bot.db_ping", status="fail", error=str(exc))
 
 
+async def _smoke_varus(log: structlog.stdlib.BoundLogger) -> None:
+    source = VarusSource(timeout_seconds=settings.varus_request_timeout_seconds)
+    try:
+        results = await source.search_by_name(
+            "молоко", shop_id=settings.varus_default_shop_id, limit=3
+        )
+        log.info(
+            "shopping_bot.varus_smoke",
+            status="ok",
+            hits=len(results),
+            first=results[0].name if results else None,
+        )
+    except SourceUnavailable as exc:
+        log.error("shopping_bot.varus_smoke", status="fail", error=str(exc))
+    finally:
+        await source.aclose()
+
+
 async def run() -> None:
     configure_logging()
     log = structlog.get_logger()
@@ -37,10 +56,10 @@ async def run() -> None:
         note="handlers wired in later tasks",
     )
     await _ping_db(log)
-    # Real wiring lands in tasks #3–#6:
-    #   - build enabled sources
-    #   - start APScheduler with periodic scan job
-    #   - start aiogram Dispatcher (long-polling)
+    await _smoke_varus(log)
+    # Real wiring lands in tasks #5–#6:
+    #   - APScheduler with periodic scan job
+    #   - aiogram Dispatcher (long-polling)
     # Until then keep the process alive so the platform doesn't loop-restart us.
     while True:
         await asyncio.sleep(3600)
