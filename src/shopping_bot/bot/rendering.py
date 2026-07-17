@@ -11,6 +11,17 @@ _URL_BASE = {
     "varus": "https://varus.ua/",
 }
 
+_IMG_URL_BUILDER = {
+    # Varus serves per-SKU webp at https://varus.ua/img/product/{w}/{h}/{sku}
+    # 670x670 balances quality vs bandwidth for Telegram cards.
+    "varus": lambda sku, size=670: f"https://varus.ua/img/product/{size}/{size}/{sku}",
+}
+
+
+def product_image_url(source: str, sku: str, size: int = 670) -> str | None:
+    builder = _IMG_URL_BUILDER.get(source)
+    return builder(sku, size) if builder else None
+
 
 def _money(value: Decimal | float | None) -> str:
     if value is None:

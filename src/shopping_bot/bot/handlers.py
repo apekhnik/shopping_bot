@@ -18,6 +18,7 @@ from shopping_bot.bot.keyboards import (
     watchlist_untrack_row,
 )
 from shopping_bot.bot.rendering import (
+    product_image_url,
     render_search_hit,
     render_watchlist_row,
 )
@@ -72,11 +73,20 @@ def build_router(
             return
 
         for snap in results:
-            await message.answer(
-                render_search_hit(snap),
-                reply_markup=track_button(snap.source, snap.sku, snap.shop_id),
-                disable_web_page_preview=True,
-            )
+            caption = render_search_hit(snap)
+            markup = track_button(snap.source, snap.sku, snap.shop_id)
+            img = product_image_url(snap.source, snap.sku)
+            sent = False
+            if img is not None:
+                try:
+                    await message.answer_photo(photo=img, caption=caption, reply_markup=markup)
+                    sent = True
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("bot.search_photo_failed", sku=snap.sku, error=str(exc))
+            if not sent:
+                await message.answer(
+                    caption, reply_markup=markup, disable_web_page_preview=True
+                )
 
     async def _show_list(message: Message, user: User) -> None:
         async with session_factory() as session:

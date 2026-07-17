@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from shopping_bot.bot.rendering import (
+    product_image_url,
     product_url,
     render_event,
     render_search_hit,
@@ -34,6 +35,18 @@ def test_product_url_uses_source_base() -> None:
     assert product_url("varus", "kokosove-moloko") == "https://varus.ua/kokosove-moloko"
     assert product_url("varus", None) is None
     assert product_url("unknown", "x") is None
+
+
+def test_product_image_url_varus_pattern() -> None:
+    assert (
+        product_image_url("varus", "2615912")
+        == "https://varus.ua/img/product/670/670/2615912"
+    )
+    assert (
+        product_image_url("varus", "2615912", size=300)
+        == "https://varus.ua/img/product/300/300/2615912"
+    )
+    assert product_image_url("unknown", "x") is None
 
 
 def test_render_search_hit_escapes_html_and_includes_discount() -> None:
