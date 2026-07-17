@@ -6,6 +6,12 @@ import signal
 import structlog
 from sqlalchemy import text
 
+from shopping_bot.bot import (
+    build_bot,
+    build_dispatcher,
+    build_notify_sink,
+    start_polling,
+)
 from shopping_bot.config import settings
 from shopping_bot.db.session import SessionLocal, engine
 from shopping_bot.logging_setup import configure_logging
@@ -53,21 +59,37 @@ async def run() -> None:
         db_url=_mask_db_url(str(engine.url)),
         scan_interval=settings.scan_interval_seconds,
         default_shop_id=settings.varus_default_shop_id,
+        bot_configured=bool(settings.telegram_bot_token),
     )
 
     await _ping_db(log)
 
     varus = VarusSource(timeout_seconds=settings.varus_request_timeout_seconds)
+    sources = {"varus": varus}
     await _smoke_varus(varus, log)
+
+    bot = None
+    polling_task: asyncio.Task | None = None
+    notify_sink = None
+
+    if settings.telegram_bot_token:
+        bot = build_bot(settings.telegram_bot_token)
+        dispatcher = build_dispatcher(SessionLocal, sources)
+        polling_task = await start_polling(bot, dispatcher)
+        notify_sink = build_notify_sink(bot, SessionLocal)
+    else:
+        log.warning(
+            "shopping_bot.bot_disabled",
+            reason="TELEGRAM_BOT_TOKEN is empty",
+            note="scheduler still runs, notifications will be dropped",
+        )
 
     runner = ScanRunner(
         session_factory=SessionLocal,
-        sources={"varus": varus},
+        sources=sources,
         interval_seconds=settings.scan_interval_seconds,
-        notify_sink=None,  # bot wires this in task #6
+        notify_sink=notify_sink,
     )
-    # First pass immediately so we get a "scan.done" log right after boot
-    # (helps confirm the scheduler wiring works even before the interval fires).
     await runner.run_once()
     runner.start()
 
@@ -77,13 +99,20 @@ async def run() -> None:
         try:
             loop.add_signal_handler(sig, stop_signal.set)
         except NotImplementedError:
-            # Windows dev — signals aren't wired the same way; keepalive still works.
             pass
     try:
         await stop_signal.wait()
     finally:
         log.info("shopping_bot.shutdown")
         await runner.stop()
+        if polling_task is not None:
+            polling_task.cancel()
+            try:
+                await polling_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if bot is not None:
+            await bot.session.close()
         await engine.dispose()
 
 
