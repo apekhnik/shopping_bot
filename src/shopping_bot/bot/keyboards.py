@@ -1,7 +1,24 @@
 from __future__ import annotations
 
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
+
+BTN_ADD = "➕ Додати"
+BTN_LIST = "📋 Мій список"
+
+
+def main_menu() -> ReplyKeyboardMarkup:
+    """Persistent bottom keyboard shown to registered users."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=BTN_ADD), KeyboardButton(text=BTN_LIST)]],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 
 class TrackCallback(CallbackData, prefix="trk"):

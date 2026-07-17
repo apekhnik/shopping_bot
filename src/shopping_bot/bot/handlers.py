@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import structlog
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from shopping_bot.bot.keyboards import (
+    BTN_ADD,
+    BTN_LIST,
     TrackCallback,
     UntrackCallback,
+    main_menu,
     track_button,
     untrack_button,
 )
@@ -17,6 +21,7 @@ from shopping_bot.bot.rendering import (
     render_search_hit,
     render_watchlist_row,
 )
+from shopping_bot.bot.states import AddFlow
 from shopping_bot.config import settings
 from shopping_bot.db.models import ProductState, User, WatchedProduct
 from shopping_bot.sources.base import Source
@@ -44,35 +49,14 @@ def build_router(
                 )
                 session.add(user)
                 await session.commit()
-                log.info("bot.user_registered", user_id=tg_user.id, username=tg_user.username)
+                log.info(
+                    "bot.user_registered",
+                    user_id=tg_user.id,
+                    username=tg_user.username,
+                )
             return user
 
-    @router.message(CommandStart())
-    async def cmd_start(message: Message) -> None:
-        await _ensure_user(message)
-        await message.answer(
-            "Привіт! Я слідкую за знижками у Varus.\n\n"
-            "<b>/add кокосове молоко</b> — знайти товар і почати відстежувати.\n"
-            "<b>/list</b> — мій список відстежень.\n"
-            "<b>/remove</b> — прибрати щось зі списку.\n\n"
-            f"За замовчуванням магазин — <code>shop_id={settings.varus_default_shop_id}</code>."
-        )
-
-    @router.message(Command("help"))
-    async def cmd_help(message: Message) -> None:
-        await cmd_start(message)
-
-    @router.message(Command("add"))
-    async def cmd_add(message: Message) -> None:
-        user = await _ensure_user(message)
-        query = (message.text or "").removeprefix("/add").strip()
-        if not query:
-            await message.answer(
-                "Напиши, що шукати, після <code>/add</code>. Приклад:\n"
-                "<code>/add кокосове молоко</code>"
-            )
-            return
-
+    async def _do_search(message: Message, user: User, query: str) -> None:
         source = sources.get(default_source)
         if source is None:
             await message.answer("Джерело не налаштоване. Спробуй пізніше.")
@@ -94,6 +78,123 @@ def build_router(
                 disable_web_page_preview=True,
             )
 
+    async def _show_list(message: Message, user: User) -> None:
+        async with session_factory() as session:
+            watched_stmt = (
+                select(WatchedProduct)
+                .where(WatchedProduct.user_id == user.telegram_user_id)
+                .order_by(WatchedProduct.added_at.desc())
+            )
+            watched = (await session.execute(watched_stmt)).scalars().all()
+            if not watched:
+                await message.answer(
+                    f"Список порожній. Натисни <b>{BTN_ADD}</b> або напиши "
+                    "<code>/add назва</code>."
+                )
+                return
+
+            keys = [(w.source, w.sku, w.shop_id) for w in watched]
+            states_stmt = select(ProductState).where(
+                tuple_(
+                    ProductState.source, ProductState.sku, ProductState.shop_id
+                ).in_(keys)
+            )
+            states = {
+                (s.source, s.sku, s.shop_id): s
+                for s in (await session.execute(states_stmt)).scalars().all()
+            }
+
+        for w in watched:
+            state = states.get((w.source, w.sku, w.shop_id))
+            await message.answer(
+                render_watchlist_row(w.source, w.sku, w.name_cache, w.url_key, state),
+                reply_markup=untrack_button(w.id),
+                disable_web_page_preview=True,
+            )
+
+    # -------- commands --------
+
+    @router.message(CommandStart())
+    async def cmd_start(message: Message, state: FSMContext) -> None:
+        await _ensure_user(message)
+        await state.clear()
+        await message.answer(
+            "Привіт! Я слідкую за знижками у Varus.\n\n"
+            f"• <b>{BTN_ADD}</b> — знайти товар та почати відстежувати\n"
+            f"• <b>{BTN_LIST}</b> — переглянути список і прибрати непотрібне\n\n"
+            f"За замовчуванням магазин — <code>shop_id={settings.varus_default_shop_id}</code>. "
+            "Скасувати додавання — /cancel.",
+            reply_markup=main_menu(),
+        )
+
+    @router.message(Command("help"))
+    async def cmd_help(message: Message, state: FSMContext) -> None:
+        await cmd_start(message, state)
+
+    @router.message(Command("cancel"))
+    async def cmd_cancel(message: Message, state: FSMContext) -> None:
+        current = await state.get_state()
+        await state.clear()
+        if current:
+            await message.answer("Ок, скасував.", reply_markup=main_menu())
+        else:
+            await message.answer("Нема що скасовувати.", reply_markup=main_menu())
+
+    @router.message(Command("add"))
+    async def cmd_add(message: Message, state: FSMContext) -> None:
+        user = await _ensure_user(message)
+        query = (message.text or "").removeprefix("/add").strip()
+        if not query:
+            await state.set_state(AddFlow.waiting_for_query)
+            await message.answer(
+                "Що шукати? Напиши назву товара (можна кілька слів).\n"
+                "Скасувати — /cancel."
+            )
+            return
+        await state.clear()
+        await _do_search(message, user, query)
+
+    @router.message(Command("list"))
+    async def cmd_list(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        user = await _ensure_user(message)
+        await _show_list(message, user)
+
+    @router.message(Command("remove"))
+    async def cmd_remove(message: Message, state: FSMContext) -> None:
+        await cmd_list(message, state)
+
+    # -------- reply-keyboard buttons --------
+
+    @router.message(F.text == BTN_ADD)
+    async def btn_add(message: Message, state: FSMContext) -> None:
+        await _ensure_user(message)
+        await state.set_state(AddFlow.waiting_for_query)
+        await message.answer(
+            "Що шукати? Напиши назву товара (можна кілька слів).\n"
+            "Скасувати — /cancel."
+        )
+
+    @router.message(F.text == BTN_LIST)
+    async def btn_list(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        user = await _ensure_user(message)
+        await _show_list(message, user)
+
+    # -------- FSM: waiting for search query --------
+
+    @router.message(AddFlow.waiting_for_query, F.text)
+    async def add_query_received(message: Message, state: FSMContext) -> None:
+        query = (message.text or "").strip()
+        if not query:
+            await message.answer("Порожній запит. Напиши хоч слово, або /cancel.")
+            return
+        user = await _ensure_user(message)
+        await state.clear()
+        await _do_search(message, user, query)
+
+    # -------- callbacks --------
+
     @router.callback_query(TrackCallback.filter())
     async def cb_track(cb: CallbackQuery, callback_data: TrackCallback) -> None:
         user = await _ensure_user(cb)
@@ -102,7 +203,6 @@ def build_router(
             await cb.answer("Джерело не налаштоване.", show_alert=True)
             return
 
-        # Refresh the SKU to cache its name/url_key/current state.
         snapshots = await source.fetch_by_skus([callback_data.sku], callback_data.shop_id)
         if not snapshots:
             await cb.answer("Товар не знайшов у каталозі.", show_alert=True)
@@ -140,46 +240,6 @@ def build_router(
             sku=snap.sku,
         )
         await cb.answer("✅ Відстежую!", show_alert=False)
-
-    @router.message(Command("list"))
-    async def cmd_list(message: Message) -> None:
-        user = await _ensure_user(message)
-        async with session_factory() as session:
-            watched_stmt = (
-                select(WatchedProduct)
-                .where(WatchedProduct.user_id == user.telegram_user_id)
-                .order_by(WatchedProduct.added_at.desc())
-            )
-            watched = (await session.execute(watched_stmt)).scalars().all()
-            if not watched:
-                await message.answer(
-                    "Список порожній. Додай товар через <code>/add назва</code>."
-                )
-                return
-
-            keys = [(w.source, w.sku, w.shop_id) for w in watched]
-            states_stmt = select(ProductState).where(
-                tuple_(
-                    ProductState.source, ProductState.sku, ProductState.shop_id
-                ).in_(keys)
-            )
-            states = {
-                (s.source, s.sku, s.shop_id): s
-                for s in (await session.execute(states_stmt)).scalars().all()
-            }
-
-        for w in watched:
-            state = states.get((w.source, w.sku, w.shop_id))
-            await message.answer(
-                render_watchlist_row(w.source, w.sku, w.name_cache, w.url_key, state),
-                reply_markup=untrack_button(w.id),
-                disable_web_page_preview=True,
-            )
-
-    @router.message(Command("remove"))
-    async def cmd_remove(message: Message) -> None:
-        # /remove is a convenience alias — the untrack action lives on each /list card.
-        await cmd_list(message)
 
     @router.callback_query(UntrackCallback.filter())
     async def cb_untrack(cb: CallbackQuery, callback_data: UntrackCallback) -> None:
