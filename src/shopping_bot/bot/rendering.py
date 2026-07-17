@@ -63,9 +63,67 @@ def render_search_hit(snap: ProductSnapshot) -> str:
     return "\n".join(lines)
 
 
+_NAME_MAX = 30
+
+
+def _truncate_name(name: str) -> str:
+    if len(name) <= _NAME_MAX:
+        return name
+    return name[: _NAME_MAX - 1].rstrip() + "…"
+
+
+def _price_cell(value: Decimal | float | None) -> str:
+    """8-char right-aligned price column, ending in '₴'."""
+    if value is None:
+        return "       —"
+    return f"{Decimal(value):>7.2f}₴"
+
+
+def _watchlist_table_row(
+    pos: int,
+    source: str,
+    name: str,
+    url_key: str | None,
+    state: ProductState | None,
+) -> str:
+    """Two-line pre-block chunk for one watchlist item.
+
+    Layout inside <pre>:
+      "  1. -38% │  34.90₴ │ було 55.90₴"
+      "     <a href=...>Напій Revo Кокос 500 мл</a>"
+    Widths are tuned for ~30-column mobile monospace.
+    """
+    disc_col = (
+        f"-{state.discount_percent}%".rjust(5)
+        if state and state.discount_percent
+        else "     "
+    )
+    price = _price_cell(
+        state.special_price if state and state.special_price else (state.price if state else None)
+    )
+
+    if state is None:
+        note = "не сканували"
+    elif state.discount_percent and state.special_price:
+        note = f"було {Decimal(state.price):.2f}₴"
+    elif not state.in_stock:
+        note = "немає"
+    else:
+        note = "без знижки"
+
+    head = f"{pos:>2}. {disc_col} │ {price} │ {note}"
+
+    name_escaped = escape(_truncate_name(name))
+    url = product_url(source, url_key)
+    name_line = (
+        f'   <a href="{escape(url)}">{name_escaped}</a>' if url else f"   {name_escaped}"
+    )
+    return f"{head}\n{name_line}"
+
+
 def render_watchlist_row(source: str, sku: str, name: str, url_key: str | None,
                         state: ProductState | None) -> str:
-    """One line in /list output (single-message layout)."""
+    """Kept for tests / future single-item views (event messages, etc)."""
     name_escaped = escape(name)
     url = product_url(source, url_key)
     name_html = f'<a href="{escape(url)}">{name_escaped}</a>' if url else f"<b>{name_escaped}</b>"
@@ -84,6 +142,21 @@ def render_watchlist_row(source: str, sku: str, name: str, url_key: str | None,
     if not state.in_stock:
         head += "  ·  немає"
     return head
+
+
+def render_watchlist_table(
+    items: list[tuple[int, str, str, str | None, ProductState | None]],
+) -> str:
+    """Full /list message body wrapped in one <pre> block.
+
+    items = list of (pos_1based, source, name, url_key, state).
+    """
+    parts = [f"Твій список ({len(items)}):", ""]
+    for pos, source, name, url_key, state in items:
+        parts.append(_watchlist_table_row(pos, source, name, url_key, state))
+        parts.append("")
+    inner = "\n".join(parts).rstrip()
+    return f"<pre>{inner}</pre>"
 
 
 def render_event(event: PriceEvent) -> str:

@@ -20,7 +20,7 @@ from shopping_bot.bot.keyboards import (
 from shopping_bot.bot.rendering import (
     product_image_url,
     render_search_hit,
-    render_watchlist_row,
+    render_watchlist_table,
 )
 from shopping_bot.bot.states import AddFlow
 from shopping_bot.config import settings
@@ -114,18 +114,15 @@ def build_router(
                 for s in (await session.execute(states_stmt)).scalars().all()
             }
 
-        # Compose one numbered message + one grid of 🗑 N buttons.
-        lines: list[str] = [f"<b>Твій список ({len(watched)}):</b>", ""]
+        items: list[tuple[int, str, str, str | None, ProductState | None]] = []
         buttons: list[tuple[int, int]] = []
         for pos, w in enumerate(watched, start=1):
             state = states.get((w.source, w.sku, w.shop_id))
-            row = render_watchlist_row(w.source, w.sku, w.name_cache, w.url_key, state)
-            lines.append(f"<b>{pos}.</b> {row}")
-            lines.append("")
+            items.append((pos, w.source, w.name_cache, w.url_key, state))
             buttons.append((pos, w.id))
 
         await message.answer(
-            "\n".join(lines).rstrip(),
+            render_watchlist_table(items),
             reply_markup=watchlist_untrack_row(buttons),
             disable_web_page_preview=True,
         )
@@ -310,17 +307,15 @@ def build_router(
                 pass
             return
 
-        lines: list[str] = [f"<b>Твій список ({len(watched)}):</b>", ""]
+        items: list[tuple[int, str, str, str | None, ProductState | None]] = []
         buttons: list[tuple[int, int]] = []
         for pos, w in enumerate(watched, start=1):
             state = state_map.get((w.source, w.sku, w.shop_id))
-            row = render_watchlist_row(w.source, w.sku, w.name_cache, w.url_key, state)
-            lines.append(f"<b>{pos}.</b> {row}")
-            lines.append("")
+            items.append((pos, w.source, w.name_cache, w.url_key, state))
             buttons.append((pos, w.id))
         try:
             await cb.message.edit_text(
-                "\n".join(lines).rstrip(),
+                render_watchlist_table(items),
                 reply_markup=watchlist_untrack_row(buttons),
                 disable_web_page_preview=True,
             )
