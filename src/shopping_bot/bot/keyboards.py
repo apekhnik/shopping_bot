@@ -51,3 +51,27 @@ def untrack_button(watched_id: int) -> InlineKeyboardMarkup:
             )
         ]]
     )
+
+
+def watchlist_untrack_row(items: list[tuple[int, int]]) -> InlineKeyboardMarkup:
+    """Grid of numbered 🗑 buttons for the /list summary message.
+
+    items = list of (position_1_based, watched_id).
+    Wraps to 5 buttons per row so long lists stay readable on mobile.
+    """
+    per_row = 5
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for pos, watched_id in items:
+        row.append(
+            InlineKeyboardButton(
+                text=f"🗑 {pos}",
+                callback_data=UntrackCallback(watched_id=watched_id).pack(),
+            )
+        )
+        if len(row) == per_row:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)

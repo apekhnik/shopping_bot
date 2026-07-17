@@ -15,7 +15,7 @@ from shopping_bot.bot.keyboards import (
     UntrackCallback,
     main_menu,
     track_button,
-    untrack_button,
+    watchlist_untrack_row,
 )
 from shopping_bot.bot.rendering import (
     render_search_hit,
@@ -104,13 +104,21 @@ def build_router(
                 for s in (await session.execute(states_stmt)).scalars().all()
             }
 
-        for w in watched:
+        # Compose one numbered message + one grid of 🗑 N buttons.
+        lines: list[str] = [f"<b>Твій список ({len(watched)}):</b>", ""]
+        buttons: list[tuple[int, int]] = []
+        for pos, w in enumerate(watched, start=1):
             state = states.get((w.source, w.sku, w.shop_id))
-            await message.answer(
-                render_watchlist_row(w.source, w.sku, w.name_cache, w.url_key, state),
-                reply_markup=untrack_button(w.id),
-                disable_web_page_preview=True,
-            )
+            row = render_watchlist_row(w.source, w.sku, w.name_cache, w.url_key, state)
+            lines.append(f"<b>{pos}.</b> {row}")
+            lines.append("")
+            buttons.append((pos, w.id))
+
+        await message.answer(
+            "\n".join(lines).rstrip(),
+            reply_markup=watchlist_untrack_row(buttons),
+            disable_web_page_preview=True,
+        )
 
     # -------- commands --------
 
@@ -251,16 +259,63 @@ def build_router(
                 return
             await session.delete(item)
             await session.commit()
+
+            # Rebuild list right away so the summary message stays in sync.
+            watched_stmt = (
+                select(WatchedProduct)
+                .where(WatchedProduct.user_id == user.telegram_user_id)
+                .order_by(WatchedProduct.added_at.desc())
+            )
+            watched = (await session.execute(watched_stmt)).scalars().all()
+            state_map: dict[tuple[str, str, int], ProductState] = {}
+            if watched:
+                keys = [(w.source, w.sku, w.shop_id) for w in watched]
+                states_stmt = select(ProductState).where(
+                    tuple_(
+                        ProductState.source, ProductState.sku, ProductState.shop_id
+                    ).in_(keys)
+                )
+                state_map = {
+                    (s.source, s.sku, s.shop_id): s
+                    for s in (await session.execute(states_stmt)).scalars().all()
+                }
+
         log.info(
             "bot.watched_removed",
             user_id=user.telegram_user_id,
             watched_id=callback_data.watched_id,
         )
         await cb.answer("Прибрав.", show_alert=False)
-        if cb.message:
+
+        if cb.message is None:
+            return
+
+        if not watched:
             try:
-                await cb.message.delete()
+                await cb.message.edit_text(
+                    "Список порожній. Додай товар через кнопку "
+                    f"<b>{BTN_ADD}</b>."
+                )
             except Exception:  # noqa: BLE001
                 pass
+            return
+
+        lines: list[str] = [f"<b>Твій список ({len(watched)}):</b>", ""]
+        buttons: list[tuple[int, int]] = []
+        for pos, w in enumerate(watched, start=1):
+            state = state_map.get((w.source, w.sku, w.shop_id))
+            row = render_watchlist_row(w.source, w.sku, w.name_cache, w.url_key, state)
+            lines.append(f"<b>{pos}.</b> {row}")
+            lines.append("")
+            buttons.append((pos, w.id))
+        try:
+            await cb.message.edit_text(
+                "\n".join(lines).rstrip(),
+                reply_markup=watchlist_untrack_row(buttons),
+                disable_web_page_preview=True,
+            )
+        except Exception:  # noqa: BLE001
+            # edit_text can fail if content is identical (rare) or too old; ignore.
+            pass
 
     return router

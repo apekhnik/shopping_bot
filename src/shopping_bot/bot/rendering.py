@@ -54,24 +54,24 @@ def render_search_hit(snap: ProductSnapshot) -> str:
 
 def render_watchlist_row(source: str, sku: str, name: str, url_key: str | None,
                         state: ProductState | None) -> str:
-    """One line in /list output."""
+    """One line in /list output (single-message layout)."""
     name_escaped = escape(name)
+    url = product_url(source, url_key)
+    name_html = f'<a href="{escape(url)}">{name_escaped}</a>' if url else f"<b>{name_escaped}</b>"
+
     if state is None:
-        return f"• <b>{name_escaped}</b>\n  <i>ще не сканували</i>"
+        return f"{name_html}\n  <i>ще не сканували</i>"
 
     if state.discount_percent and state.discount_percent > 0 and state.special_price:
         head = (
-            f"• <b>−{state.discount_percent}%</b> {name_escaped}\n"
-            f"  {_money(state.special_price)} <s>{_money(state.price)}</s>"
+            f"<b>−{state.discount_percent}%</b>  {name_html}\n"
+            f"  {_money(state.special_price)}  <s>{_money(state.price)}</s>"
         )
     else:
-        head = f"• {name_escaped}\n  {_money(state.price)}  ·  без знижки"
+        head = f"{name_html}\n  {_money(state.price)}  ·  без знижки"
 
     if not state.in_stock:
         head += "  ·  немає"
-    url = product_url(source, url_key)
-    if url:
-        head += f'\n  <a href="{escape(url)}">на сайті</a>'
     return head
 
 
