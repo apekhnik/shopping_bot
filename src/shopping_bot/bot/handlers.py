@@ -11,12 +11,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from shopping_bot.bot.keyboards import (
     BTN_ADD,
     BTN_LIST,
+    BTN_RANDOM_SNACK,
     TrackCallback,
     UntrackCallback,
     main_menu,
     track_button,
     watchlist_untrack_row,
 )
+from shopping_bot.bot.random_pick import pick_random_snacks
 from shopping_bot.bot.rendering import (
     product_image_url,
     render_search_hit,
@@ -57,6 +59,18 @@ def build_router(
                 )
             return user
 
+    async def _send_product_card(message: Message, snap) -> None:
+        caption = render_search_hit(snap)
+        markup = track_button(snap.source, snap.sku, snap.shop_id)
+        img = product_image_url(snap.source, snap.sku)
+        if img is not None:
+            try:
+                await message.answer_photo(photo=img, caption=caption, reply_markup=markup)
+                return
+            except Exception as exc:  # noqa: BLE001
+                log.warning("bot.product_photo_failed", sku=snap.sku, error=str(exc))
+        await message.answer(caption, reply_markup=markup, disable_web_page_preview=True)
+
     async def _do_search(message: Message, user: User, query: str) -> None:
         source = sources.get(default_source)
         if source is None:
@@ -73,20 +87,7 @@ def build_router(
             return
 
         for snap in results:
-            caption = render_search_hit(snap)
-            markup = track_button(snap.source, snap.sku, snap.shop_id)
-            img = product_image_url(snap.source, snap.sku)
-            sent = False
-            if img is not None:
-                try:
-                    await message.answer_photo(photo=img, caption=caption, reply_markup=markup)
-                    sent = True
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("bot.search_photo_failed", sku=snap.sku, error=str(exc))
-            if not sent:
-                await message.answer(
-                    caption, reply_markup=markup, disable_web_page_preview=True
-                )
+            await _send_product_card(message, snap)
 
     async def _show_list(message: Message, user: User) -> None:
         async with session_factory() as session:
@@ -136,7 +137,8 @@ def build_router(
         await message.answer(
             "Привіт! Я слідкую за знижками у Varus.\n\n"
             f"• <b>{BTN_ADD}</b> — знайти товар та почати відстежувати\n"
-            f"• <b>{BTN_LIST}</b> — переглянути список і прибрати непотрібне\n\n"
+            f"• <b>{BTN_LIST}</b> — переглянути список і прибрати непотрібне\n"
+            f"• <b>{BTN_RANDOM_SNACK}</b> — 3 випадкові снеки на пробу\n\n"
             f"За замовчуванням магазин — <code>shop_id={settings.varus_default_shop_id}</code>. "
             "Скасувати додавання — /cancel.",
             reply_markup=main_menu(),
@@ -195,6 +197,23 @@ def build_router(
         await state.clear()
         user = await _ensure_user(message)
         await _show_list(message, user)
+
+    @router.message(F.text == BTN_RANDOM_SNACK)
+    async def btn_random_snack(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        user = await _ensure_user(message)
+        source = sources.get(default_source)
+        if source is None:
+            await message.answer("Джерело не налаштоване.")
+            return
+        shop_id = user.default_shop_id or settings.varus_default_shop_id
+        picks = await pick_random_snacks(source, shop_id=shop_id, count=3)
+        if not picks:
+            await message.answer("Нічого не знайшов зараз. Спробуй ще раз.")
+            return
+        await message.answer("🎲 Ось що можна взяти до чаю:")
+        for snap in picks:
+            await _send_product_card(message, snap)
 
     # -------- FSM: waiting for search query --------
 
