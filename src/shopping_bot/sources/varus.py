@@ -167,11 +167,18 @@ class VarusSource(Source):
         tokens = [t for t in query.lower().split() if t]
         if not tokens:
             return []
-        filters = [
+        filters: list[dict[str, Any]] = [
             {"attribute": "name", "value": {"like": t}, "scope": "default"} for t in tokens
         ]
-        # In-stock filter is soft: we still want to show a match even if the
-        # product is temporarily out of stock, so user knows the SKU exists.
+        # Filter out anything the user can't actually buy — a discount tracker
+        # has nothing to offer on an out-of-stock SKU.
+        filters.append(
+            {
+                "attribute": f"sqpp_data_{shop_id}.in_stock",
+                "value": {"eq": True},
+                "scope": "default",
+            }
+        )
         data = await self._call(filters, shop_id=shop_id, size=min(limit, 20))
         hits = data.get("hits") or []
         parsed = [ps for hit in hits if (ps := _parse_hit(hit, shop_id)) is not None]
