@@ -9,7 +9,8 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from shopping_bot.bot.rendering import product_image_url, render_event
+from shopping_bot.bot.keyboards import buy_keyboard
+from shopping_bot.bot.rendering import product_image_url, product_url, render_event
 from shopping_bot.db.models import NotificationSent, WatchedProduct
 from shopping_bot.scheduler.events import PriceEvent
 
@@ -67,12 +68,13 @@ async def _dispatch_one(
 
         text = render_event(event)
         img = product_image_url(event.source, event.sku)
+        markup = buy_keyboard(product_url(event.source, event.snapshot.url_key))
 
         for watcher in watchers:
             key = (watcher.user_id, event.new_discount_percent)
             if key in already_notified:
                 continue
-            sent = await _send(bot, watcher.user_id, text, img)
+            sent = await _send(bot, watcher.user_id, text, img, markup)
             if not sent:
                 continue
             session.add(
@@ -88,12 +90,20 @@ async def _dispatch_one(
         await session.commit()
 
 
-async def _send(bot: Bot, user_id: int, text: str, image_url: str | None) -> bool:
+async def _send(
+    bot: Bot,
+    user_id: int,
+    text: str,
+    image_url: str | None,
+    reply_markup=None,
+) -> bool:
     """Best-effort send. Try photo card first, fall back to plain text."""
     try:
         if image_url is not None:
             try:
-                await bot.send_photo(user_id, photo=image_url, caption=text)
+                await bot.send_photo(
+                    user_id, photo=image_url, caption=text, reply_markup=reply_markup
+                )
                 return True
             except TelegramForbiddenError:
                 raise
@@ -106,7 +116,11 @@ async def _send(bot: Bot, user_id: int, text: str, image_url: str | None) -> boo
                     error=str(exc),
                 )
         await bot.send_message(
-            user_id, text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+            user_id,
+            text,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            reply_markup=reply_markup,
         )
         return True
     except TelegramForbiddenError:
@@ -117,7 +131,11 @@ async def _send(bot: Bot, user_id: int, text: str, image_url: str | None) -> boo
         await asyncio.sleep(exc.retry_after)
         try:
             await bot.send_message(
-                user_id, text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+                user_id,
+                text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+                reply_markup=reply_markup,
             )
             return True
         except Exception as exc2:  # noqa: BLE001

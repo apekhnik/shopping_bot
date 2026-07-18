@@ -15,12 +15,13 @@ from shopping_bot.bot.keyboards import (
     TrackCallback,
     UntrackCallback,
     main_menu,
-    track_button,
+    search_hit_keyboard,
     watchlist_untrack_row,
 )
 from shopping_bot.bot.random_pick import pick_random_snacks
 from shopping_bot.bot.rendering import (
     product_image_url,
+    product_url,
     render_search_hit,
     render_watchlist_table,
 )
@@ -61,7 +62,9 @@ def build_router(
 
     async def _send_product_card(message: Message, snap) -> None:
         caption = render_search_hit(snap)
-        markup = track_button(snap.source, snap.sku, snap.shop_id)
+        markup = search_hit_keyboard(
+            snap.source, snap.sku, snap.shop_id, product_url(snap.source, snap.url_key)
+        )
         img = product_image_url(snap.source, snap.sku)
         if img is not None:
             try:
