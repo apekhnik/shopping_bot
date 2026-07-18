@@ -200,6 +200,16 @@ class VarusSource(Source):
         # Endpoint respects `sort=<field>:desc` as a URL param — verified live —
         # so we can pull just what we need instead of paging the whole catalog.
         # Ask for slightly more than `limit` to leave room for _parse_hit rejects.
+        #
+        # Filters explained (all three needed, verified live on shop 57):
+        # - discount >= threshold  — the whole point
+        # - in_stock=true          — item is stocked at this shop
+        # - availability.delivery  — this is the ONE that actually gates
+        #   "can the customer buy this right now". `in_stock=true` is a
+        #   catalog flag that stays true even when the site refuses to
+        #   sell the SKU (delivery mode). ~18% of in-stock discounts are
+        #   pickup-only and would show as "немає в наявності" for anyone
+        #   using the site normally.
         filters: list[dict[str, Any]] = [
             {
                 "attribute": f"sqpp_data_{shop_id}.special_price_discount",
@@ -208,6 +218,11 @@ class VarusSource(Source):
             },
             {
                 "attribute": f"sqpp_data_{shop_id}.in_stock",
+                "value": {"eq": True},
+                "scope": "default",
+            },
+            {
+                "attribute": f"sqpp_data_{shop_id}.availability.delivery",
                 "value": {"eq": True},
                 "scope": "default",
             },

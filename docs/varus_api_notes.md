@@ -62,6 +62,17 @@ https://varus.ua/api/catalog/vue_storefront_catalog_2/product_v2/_search
 
 `sqpp_data_region_default` — почти то же самое, но по региону, а не магазину.
 
+**Важно про наличие:**
+- `in_stock=true` — "заведён в каталог магазина", а НЕ "прямо сейчас можно купить".
+- `availability.delivery=true` — вот это реально означает "сайт продаст этот
+  SKU в режиме доставки". У ~18% товаров shop 57 с `in_stock=true` и активной
+  скидкой `delivery=false` — они лежат физически на полке, но заказать нельзя.
+- `availability.pickup=true` — можно забрать из магазина. У всех in-stock
+  товаров совпадает с `in_stock` (проверено на shop 57), т.е. фильтр по нему
+  ничего не даёт.
+- Для витрин "можно купить" (например, `/top`) фильтруй по
+  `sqpp_data_<shop>.availability.delivery = true`.
+
 **Как считать скидку:**
 - Есть акция ⇔ `special_price_discount > 0`.
 - Старая цена = `price`, новая = `special_price`, % скидки = `special_price_discount`.

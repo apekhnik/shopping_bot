@@ -125,10 +125,12 @@ async def test_top_discounts_sends_gte_filter_and_sort(
     req = httpx_mock.get_requests()[0]
     assert req.url.params.get("sort") == "sqpp_data_57.special_price_discount:desc"
     request_json = req.url.params.get("request")
-    # Both required filters are present
     assert "special_price_discount" in request_json
     assert '"gte":50' in request_json
     assert "in_stock" in request_json
+    # availability.delivery filter is what actually keeps unbuyable pickup-only
+    # items out of the top — see top_discounts docstring.
+    assert "availability.delivery" in request_json
     await source.aclose()
 
 
