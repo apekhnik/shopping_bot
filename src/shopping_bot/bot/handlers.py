@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import structlog
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from shopping_bot.bot.keyboards import (
     BTN_ADD,
+    BTN_CLEAR,
     BTN_LIST,
     BTN_RANDOM_SNACK,
     TrackCallback,
@@ -18,6 +19,7 @@ from shopping_bot.bot.keyboards import (
     search_hit_keyboard,
     watchlist_untrack_row,
 )
+from shopping_bot.bot.message_log import TrackedMessages, clear_chat
 from shopping_bot.bot.random_pick import pick_random_snacks
 from shopping_bot.bot.rendering import (
     product_image_url,
@@ -36,6 +38,7 @@ log = structlog.get_logger(__name__)
 def build_router(
     session_factory: async_sessionmaker,
     sources: dict[str, Source],
+    tracked_messages: TrackedMessages,
     default_source: str = "varus",
 ) -> Router:
     router = Router()
@@ -141,7 +144,8 @@ def build_router(
             "Привіт! Я слідкую за знижками у Varus.\n\n"
             f"• <b>{BTN_ADD}</b> — знайти товар та почати відстежувати\n"
             f"• <b>{BTN_LIST}</b> — переглянути список і прибрати непотрібне\n"
-            f"• <b>{BTN_RANDOM_SNACK}</b> — 3 випадкові снеки на пробу\n\n"
+            f"• <b>{BTN_RANDOM_SNACK}</b> — 3 випадкові снеки на пробу\n"
+            f"• <b>{BTN_CLEAR}</b> — прибрати мої повідомлення з чату\n\n"
             f"За замовчуванням магазин — <code>shop_id={settings.varus_default_shop_id}</code>. "
             "Скасувати додавання — /cancel.",
             reply_markup=main_menu(),
@@ -200,6 +204,31 @@ def build_router(
         await state.clear()
         user = await _ensure_user(message)
         await _show_list(message, user)
+
+    async def _do_clear(message: Message, bot: Bot) -> None:
+        # Try to remove the user's trigger message too — Telegram lets bots
+        # delete incoming messages in private chats within 48h.
+        try:
+            await message.delete()
+        except Exception:  # noqa: BLE001
+            pass
+        deleted = await clear_chat(bot, message.chat.id, tracked_messages)
+        note = (
+            f"🧹 Очистив {deleted} повідомлень."
+            if deleted
+            else "Нема що чистити."
+        )
+        await message.answer(note, reply_markup=main_menu())
+
+    @router.message(Command("clear"))
+    async def cmd_clear(message: Message, bot: Bot, state: FSMContext) -> None:
+        await state.clear()
+        await _do_clear(message, bot)
+
+    @router.message(F.text == BTN_CLEAR)
+    async def btn_clear(message: Message, bot: Bot, state: FSMContext) -> None:
+        await state.clear()
+        await _do_clear(message, bot)
 
     @router.message(F.text == BTN_RANDOM_SNACK)
     async def btn_random_snack(message: Message, state: FSMContext) -> None:

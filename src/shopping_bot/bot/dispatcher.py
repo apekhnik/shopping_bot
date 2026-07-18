@@ -11,6 +11,7 @@ from aiogram.types import BotCommand
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from shopping_bot.bot.handlers import build_router
+from shopping_bot.bot.message_log import TrackedMessages, TrackSentMiddleware
 from shopping_bot.sources.base import Source
 
 log = structlog.get_logger(__name__)
@@ -18,23 +19,28 @@ log = structlog.get_logger(__name__)
 _MENU_COMMANDS = [
     BotCommand(command="add", description="Знайти товар та відстежувати"),
     BotCommand(command="list", description="Мій список"),
+    BotCommand(command="clear", description="Прибрати мої повідомлення"),
     BotCommand(command="cancel", description="Скасувати поточну дію"),
     BotCommand(command="help", description="Допомога"),
 ]
 
 
-def build_bot(token: str) -> Bot:
-    return Bot(
+def build_bot(token: str, tracked: TrackedMessages) -> Bot:
+    bot = Bot(
         token=token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    bot.session.middleware(TrackSentMiddleware(tracked))
+    return bot
 
 
 def build_dispatcher(
-    session_factory: async_sessionmaker, sources: dict[str, Source]
+    session_factory: async_sessionmaker,
+    sources: dict[str, Source],
+    tracked: TrackedMessages,
 ) -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
-    dp.include_router(build_router(session_factory, sources))
+    dp.include_router(build_router(session_factory, sources, tracked))
     return dp
 
 
