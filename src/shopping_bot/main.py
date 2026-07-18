@@ -7,7 +7,6 @@ import structlog
 from sqlalchemy import text
 
 from shopping_bot.bot import (
-    TrackedMessages,
     build_bot,
     build_dispatcher,
     build_notify_sink,
@@ -74,9 +73,8 @@ async def run() -> None:
     notify_sink = None
 
     if settings.telegram_bot_token:
-        tracked_messages = TrackedMessages()
-        bot = build_bot(settings.telegram_bot_token, tracked_messages)
-        dispatcher = build_dispatcher(SessionLocal, sources, tracked_messages)
+        bot = build_bot(settings.telegram_bot_token)
+        dispatcher = build_dispatcher(SessionLocal, sources)
         polling_task = await start_polling(bot, dispatcher)
         notify_sink = build_notify_sink(bot, SessionLocal)
     else:
