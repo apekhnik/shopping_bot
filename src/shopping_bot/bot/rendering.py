@@ -53,10 +53,6 @@ def render_search_hit(snap: ProductSnapshot) -> str:
     else:
         lines.append(f"{_money(snap.price)}  ·  без знижки зараз")
 
-    url = product_url(snap.source, snap.url_key)
-    if url:
-        lines.append(f'<a href="{escape(url)}">відкрити на сайті</a>')
-
     if not snap.in_stock:
         lines.append("<i>немає в наявності</i>")
 
@@ -162,8 +158,6 @@ def render_watchlist_table(
 def render_event(event: PriceEvent) -> str:
     snap = event.snapshot
     name = escape(snap.name)
-    url = product_url(snap.source, snap.url_key)
-    url_line = f'\n<a href="{escape(url)}">відкрити на сайті</a>' if url else ""
 
     if event.event_type is EventType.DISCOUNT_STARTED:
         head = f"🔥 <b>Нова знижка −{event.new_discount_percent}%</b>"
@@ -189,4 +183,4 @@ def render_event(event: PriceEvent) -> str:
     if snap.special_price_to_date and event.event_type is not EventType.DISCOUNT_ENDED:
         tail = f"\nдо {snap.special_price_to_date.isoformat()}"
 
-    return f"{head}\n{body}{tail}{url_line}"
+    return f"{head}\n{body}{tail}"

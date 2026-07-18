@@ -55,7 +55,6 @@ def test_render_search_hit_escapes_html_and_includes_discount() -> None:
     assert "−25%" in text
     assert "74.25" in text
     assert "<s>" in text  # crossed-out regular price
-    assert "відкрити на сайті" in text
 
 
 def test_render_search_hit_no_discount() -> None:
