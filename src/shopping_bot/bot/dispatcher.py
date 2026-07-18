@@ -18,6 +18,7 @@ log = structlog.get_logger(__name__)
 _MENU_COMMANDS = [
     BotCommand(command="add", description="Знайти товар та відстежувати"),
     BotCommand(command="list", description="Мій список"),
+    BotCommand(command="top", description="Топ знижок зараз"),
     BotCommand(command="cancel", description="Скасувати поточну дію"),
     BotCommand(command="help", description="Допомога"),
 ]

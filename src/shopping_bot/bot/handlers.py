@@ -12,6 +12,7 @@ from shopping_bot.bot.keyboards import (
     BTN_ADD,
     BTN_LIST,
     BTN_RANDOM_SNACK,
+    BTN_TOP,
     TrackCallback,
     UntrackCallback,
     main_menu,
@@ -31,6 +32,11 @@ from shopping_bot.db.models import ProductState, User, WatchedProduct
 from shopping_bot.sources.base import Source
 
 log = structlog.get_logger(__name__)
+
+_TOP_DEFAULT_MIN_DISCOUNT = 30
+_TOP_MIN_ALLOWED = 1
+_TOP_MAX_ALLOWED = 90
+_TOP_LIMIT = 5
 
 
 def build_router(
@@ -131,6 +137,44 @@ def build_router(
             disable_web_page_preview=True,
         )
 
+    async def _do_top(
+        message: Message, user: User, min_discount_percent: int
+    ) -> None:
+        source = sources.get(default_source)
+        if source is None:
+            await message.answer("Джерело не налаштоване. Спробуй пізніше.")
+            return
+        shop_id = user.default_shop_id or settings.varus_default_shop_id
+        picks = await source.top_discounts(
+            shop_id=shop_id,
+            min_discount_percent=min_discount_percent,
+            limit=_TOP_LIMIT,
+        )
+        if not picks:
+            await message.answer(
+                f"Зараз немає товарів зі знижкою ≥{min_discount_percent}%. "
+                "Спробуй нижчий поріг: /top 20"
+            )
+            return
+        await message.answer(
+            f"🔥 Топ {len(picks)} знижок (≥{min_discount_percent}%):"
+        )
+        for snap in picks:
+            await _send_product_card(message, snap)
+
+    def _parse_top_threshold(raw: str) -> int | None:
+        """Parse `/top` argument. Returns clamped int or None on garbage."""
+        raw = raw.strip()
+        if not raw:
+            return _TOP_DEFAULT_MIN_DISCOUNT
+        # accept "40" or "40%" — nothing else
+        raw = raw.rstrip("%").strip()
+        try:
+            n = int(raw)
+        except ValueError:
+            return None
+        return max(_TOP_MIN_ALLOWED, min(_TOP_MAX_ALLOWED, n))
+
     # -------- commands --------
 
     @router.message(CommandStart())
@@ -141,6 +185,8 @@ def build_router(
             "Привіт! Я слідкую за знижками у Varus.\n\n"
             f"• <b>{BTN_ADD}</b> — знайти товар та почати відстежувати\n"
             f"• <b>{BTN_LIST}</b> — переглянути список і прибрати непотрібне\n"
+            f"• <b>{BTN_TOP}</b> — топ-{_TOP_LIMIT} акцій зараз (≥{_TOP_DEFAULT_MIN_DISCOUNT}%). "
+            f"Свій поріг — <code>/top 40</code>\n"
             f"• <b>{BTN_RANDOM_SNACK}</b> — 3 випадкові снеки на пробу\n\n"
             f"За замовчуванням магазин — <code>shop_id={settings.varus_default_shop_id}</code>. "
             "Скасувати додавання — /cancel.",
@@ -184,6 +230,20 @@ def build_router(
     async def cmd_remove(message: Message, state: FSMContext) -> None:
         await cmd_list(message, state)
 
+    @router.message(Command("top"))
+    async def cmd_top(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        user = await _ensure_user(message)
+        arg = (message.text or "").removeprefix("/top").strip()
+        threshold = _parse_top_threshold(arg)
+        if threshold is None:
+            await message.answer(
+                f"Не зрозумів поріг. Приклади: /top або /top 40 "
+                f"(діапазон {_TOP_MIN_ALLOWED}–{_TOP_MAX_ALLOWED})."
+            )
+            return
+        await _do_top(message, user, threshold)
+
     # -------- reply-keyboard buttons --------
 
     @router.message(F.text == BTN_ADD)
@@ -200,6 +260,12 @@ def build_router(
         await state.clear()
         user = await _ensure_user(message)
         await _show_list(message, user)
+
+    @router.message(F.text == BTN_TOP)
+    async def btn_top(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        user = await _ensure_user(message)
+        await _do_top(message, user, _TOP_DEFAULT_MIN_DISCOUNT)
 
     @router.message(F.text == BTN_RANDOM_SNACK)
     async def btn_random_snack(message: Message, state: FSMContext) -> None:

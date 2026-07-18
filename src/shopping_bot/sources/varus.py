@@ -118,7 +118,12 @@ class VarusSource(Source):
             self._client = None
 
     async def _call(
-        self, filters: list[dict[str, Any]], shop_id: int, size: int, from_: int = 0
+        self,
+        filters: list[dict[str, Any]],
+        shop_id: int,
+        size: int,
+        from_: int = 0,
+        sort: str | None = None,
     ) -> dict[str, Any]:
         params = {
             "request": json.dumps(
@@ -131,6 +136,11 @@ class VarusSource(Source):
             "from": str(from_),
             "_source_include": ",".join(_source_include_fields(shop_id)),
         }
+        if sort:
+            # Verified live: `sort` inside the `request` body is silently ignored,
+            # but as a top-level URL param it does actually sort. Format is
+            # "<field>:<asc|desc>".
+            params["sort"] = sort
         client = self._get_client()
 
         last_error: Exception | None = None
@@ -180,6 +190,31 @@ class VarusSource(Source):
             }
         )
         data = await self._call(filters, shop_id=shop_id, size=min(limit, 20))
+        hits = data.get("hits") or []
+        parsed = [ps for hit in hits if (ps := _parse_hit(hit, shop_id)) is not None]
+        return parsed[:limit]
+
+    async def top_discounts(
+        self, shop_id: int, min_discount_percent: int, limit: int = 5
+    ) -> list[ProductSnapshot]:
+        # Endpoint respects `sort=<field>:desc` as a URL param — verified live —
+        # so we can pull just what we need instead of paging the whole catalog.
+        # Ask for slightly more than `limit` to leave room for _parse_hit rejects.
+        filters: list[dict[str, Any]] = [
+            {
+                "attribute": f"sqpp_data_{shop_id}.special_price_discount",
+                "value": {"gte": min_discount_percent},
+                "scope": "default",
+            },
+            {
+                "attribute": f"sqpp_data_{shop_id}.in_stock",
+                "value": {"eq": True},
+                "scope": "default",
+            },
+        ]
+        sort = f"sqpp_data_{shop_id}.special_price_discount:desc"
+        page_size = min(max(limit * 2, 10), _MAX_PAGE_SIZE)
+        data = await self._call(filters, shop_id=shop_id, size=page_size, sort=sort)
         hits = data.get("hits") or []
         parsed = [ps for hit in hits if (ps := _parse_hit(hit, shop_id)) is not None]
         return parsed[:limit]

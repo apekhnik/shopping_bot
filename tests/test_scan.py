@@ -28,6 +28,9 @@ class FakeSource(Source):
         self.calls.append((list(skus), shop_id))
         return [s for s in self._snapshots if s.sku in skus and s.shop_id == shop_id]
 
+    async def top_discounts(self, shop_id, min_discount_percent, limit):
+        return []
+
 
 def _snap(sku: str, discount: int | None, price: str = "100.00", special: str | None = None) -> ProductSnapshot:
     return ProductSnapshot(

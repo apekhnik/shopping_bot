@@ -98,6 +98,64 @@ async def test_search_by_name_lowercases_and_ands_tokens(
 
 
 @pytest.mark.asyncio
+async def test_top_discounts_sends_gte_filter_and_sort(
+    source: VarusSource, httpx_mock
+) -> None:
+    httpx_mock.add_response(
+        json={
+            "hits": [
+                {**_sample_hit("A"), "sqpp_data_57": {
+                    "price": 100, "special_price": 20,
+                    "special_price_discount": 80, "in_stock": True,
+                }},
+                {**_sample_hit("B"), "sqpp_data_57": {
+                    "price": 100, "special_price": 40,
+                    "special_price_discount": 60, "in_stock": True,
+                }},
+            ],
+            "total": {"value": 2, "relation": "eq"},
+        }
+    )
+    results = await source.top_discounts(
+        shop_id=57, min_discount_percent=50, limit=5
+    )
+    assert [r.sku for r in results] == ["A", "B"]
+    assert results[0].discount_percent == 80
+
+    req = httpx_mock.get_requests()[0]
+    assert req.url.params.get("sort") == "sqpp_data_57.special_price_discount:desc"
+    request_json = req.url.params.get("request")
+    # Both required filters are present
+    assert "special_price_discount" in request_json
+    assert '"gte":50' in request_json
+    assert "in_stock" in request_json
+    await source.aclose()
+
+
+@pytest.mark.asyncio
+async def test_top_discounts_respects_limit(
+    source: VarusSource, httpx_mock
+) -> None:
+    hits = []
+    for i, disc in enumerate([90, 85, 80, 70, 60, 55]):
+        h = _sample_hit(f"SKU{i}")
+        h["sqpp_data_57"] = {
+            "price": 100, "special_price": 10,
+            "special_price_discount": disc, "in_stock": True,
+        }
+        hits.append(h)
+    httpx_mock.add_response(
+        json={"hits": hits, "total": {"value": len(hits), "relation": "eq"}}
+    )
+    results = await source.top_discounts(
+        shop_id=57, min_discount_percent=30, limit=3
+    )
+    assert len(results) == 3
+    assert [r.discount_percent for r in results] == [90, 85, 80]
+    await source.aclose()
+
+
+@pytest.mark.asyncio
 async def test_fetch_by_skus_returns_empty_on_empty_input(source: VarusSource) -> None:
     assert await source.fetch_by_skus([], shop_id=57) == []
     await source.aclose()

@@ -59,5 +59,14 @@ class Source(ABC):
         the caller decides how to handle disappearances.
         """
 
+    @abstractmethod
+    async def top_discounts(
+        self, shop_id: int, min_discount_percent: int, limit: int
+    ) -> list[ProductSnapshot]:
+        """Return the N products with the biggest discount right now.
+
+        Only in-stock items. Sorted by discount % descending. Used by /top.
+        """
+
     async def aclose(self) -> None:
         """Release any long-lived resources (HTTP client, etc.)."""

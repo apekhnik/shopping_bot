@@ -11,6 +11,7 @@ from aiogram.types import (
 BTN_ADD = "➕ Додати"
 BTN_LIST = "📋 Мій список"
 BTN_RANDOM_SNACK = "🎲 Випадковий снек"
+BTN_TOP = "🔥 Топ знижок"
 
 
 def main_menu() -> ReplyKeyboardMarkup:
@@ -18,7 +19,7 @@ def main_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_ADD), KeyboardButton(text=BTN_LIST)],
-            [KeyboardButton(text=BTN_RANDOM_SNACK)],
+            [KeyboardButton(text=BTN_TOP), KeyboardButton(text=BTN_RANDOM_SNACK)],
         ],
         resize_keyboard=True,
         is_persistent=True,
